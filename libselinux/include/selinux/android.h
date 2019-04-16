@@ -53,12 +53,15 @@ extern int selinux_vendor_log_callback(int type, const char *fmt, ...)
 #define SELINUX_ANDROID_RESTORECON_DATADATA 16
 #define SELINUX_ANDROID_RESTORECON_SKIPCE   32
 #define SELINUX_ANDROID_RESTORECON_CROSS_FILESYSTEMS   64
+#define SELINUX_ANDROID_RESTORECON_SKIP_SEHASH         128
 extern int selinux_android_restorecon(const char *file, unsigned int flags);
 
 extern int selinux_android_restorecon_pkgdir(const char *pkgdir,
                                              const char *seinfo,
                                              uid_t uid,
                                              unsigned int flags);
+
+extern void selinux_android_seapp_context_init(void);
 
 extern int selinux_android_seapp_context_reload(void);
 

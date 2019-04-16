@@ -1,6 +1,7 @@
 PKG_CONFIG ?= pkg-config
 
 # Installation directories.
+LINGUAS ?= ru
 PREFIX ?= /usr
 SBINDIR ?= $(PREFIX)/sbin
 MANDIR = $(PREFIX)/share/man
@@ -18,17 +19,7 @@ DBUSLIB = $(shell $(PKG_CONFIG) --libs dbus-glib-1)
 CFLAGS ?= -g -Werror -Wall -W
 override CFLAGS += $(DBUSFLAGS)
 
-USE_PCRE2 ?= n
-ifeq ($(USE_PCRE2),y)
-	PCRE_CFLAGS := -DUSE_PCRE2 -DPCRE2_CODE_UNIT_WIDTH=8 $(shell $(PKG_CONFIG) --cflags libpcre2-8)
-	PCRE_LDLIBS := $(shell $(PKG_CONFIG) --libs libpcre2-8)
-else
-	PCRE_CFLAGS := $(shell $(PKG_CONFIG) --cflags libpcre)
-	PCRE_LDLIBS := $(shell $(PKG_CONFIG) --libs libpcre)
-endif
-export PCRE_CFLAGS PCRE_LDLIBS
-
-override LDLIBS += -lselinux $(PCRE_LDLIBS) $(DBUSLIB)
+override LDLIBS += -lselinux $(DBUSLIB)
 
 all: restorecond
 
@@ -42,6 +33,12 @@ install: all
 	-mkdir -p $(DESTDIR)$(SBINDIR)
 	install -m 755 restorecond $(DESTDIR)$(SBINDIR)
 	install -m 644 restorecond.8 $(DESTDIR)$(MANDIR)/man8
+	for lang in $(LINGUAS) ; do \
+		if [ -e $${lang} ] ; then \
+			[ -d $(DESTDIR)$(MANDIR)/$${lang}/man8 ] || mkdir -p $(DESTDIR)$(MANDIR)/$${lang}/man8 ; \
+			install -m 644 $${lang}/*.8 $(DESTDIR)$(MANDIR)/$${lang}/man8/ ; \
+		fi ; \
+	done
 	-mkdir -p $(DESTDIR)$(INITDIR)
 	install -m 755 restorecond.init $(DESTDIR)$(INITDIR)/restorecond
 	-mkdir -p $(DESTDIR)$(SELINUXDIR)
