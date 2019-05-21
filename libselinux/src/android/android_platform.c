@@ -72,76 +72,6 @@ static char const * const seapp_contexts_odm[] = {
 	"/odm_seapp_contexts"
 };
 
-uint8_t fc_digest[FC_DIGEST_SIZE];
-
-static bool compute_file_contexts_hash(uint8_t c_digest[], const struct selinux_opt *opts, unsigned nopts)
-{
-    int fd = -1;
-    void *map = MAP_FAILED;
-    bool ret = false;
-    uint8_t *fc_data = NULL;
-    size_t total_size = 0;
-    struct stat sb;
-    size_t i;
-
-    for (i = 0; i < nopts; i++) {
-        fd = open(opts[i].value, O_CLOEXEC | O_RDONLY);
-        if (fd < 0) {
-            selinux_log(SELINUX_ERROR, "SELinux:  Could not open %s:  %s\n",
-                    opts[i].value, strerror(errno));
-            goto cleanup;
-        }
-
-        if (fstat(fd, &sb) < 0) {
-            selinux_log(SELINUX_ERROR, "SELinux:  Could not stat %s:  %s\n",
-                    opts[i].value, strerror(errno));
-            goto cleanup;
-        }
-
-        if (sb.st_size == 0) {
-            selinux_log(SELINUX_WARNING, "SELinux:  Skipping %s:  empty file\n",
-                    opts[i].value);
-            goto nextfile;
-        }
-
-        map = mmap(NULL, sb.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
-        if (map == MAP_FAILED) {
-            selinux_log(SELINUX_ERROR, "SELinux:  Could not map %s:  %s\n",
-                    opts[i].value, strerror(errno));
-            goto cleanup;
-        }
-
-        fc_data = realloc(fc_data, total_size + sb.st_size);
-        if (!fc_data) {
-            selinux_log(SELINUX_ERROR, "SELinux: Count not re-alloc for %s:  %s\n",
-                     opts[i].value, strerror(errno));
-            goto cleanup;
-        }
-
-        memcpy(fc_data + total_size, map, sb.st_size);
-        total_size += sb.st_size;
-
-        /* reset everything for next file */
-        munmap(map, sb.st_size);
-nextfile:
-        close(fd);
-        map = MAP_FAILED;
-        fd = -1;
-    }
-
-    SHA1(fc_data, total_size, c_digest);
-    ret = true;
-
-cleanup:
-    if (map != MAP_FAILED)
-        munmap(map, sb.st_size);
-    if (fd >= 0)
-        close(fd);
-    free(fc_data);
-
-    return ret;
-}
-
 static struct selabel_handle* selinux_android_file_context(const struct selinux_opt *opts,
                                                     unsigned nopts)
 {
@@ -156,10 +86,6 @@ static struct selabel_handle* selinux_android_file_context(const struct selinux_
     if (!sehandle) {
         selinux_log(SELINUX_ERROR, "%s: Error getting file context handle (%s)\n",
                 __FUNCTION__, strerror(errno));
-        return NULL;
-    }
-    if (!compute_file_contexts_hash(fc_digest, opts, nopts)) {
-        selabel_close(sehandle);
         return NULL;
     }
 
@@ -277,8 +203,6 @@ struct seapp_context {
 	bool isSystemServer;
 	bool isEphemeralAppSet;
 	bool isEphemeralApp;
-	bool isV2AppSet;
-	bool isV2App;
 	bool isOwnerSet;
 	bool isOwner;
 	struct prefix_str user;
@@ -327,12 +251,6 @@ static int seapp_context_cmp(const void *A, const void *B)
 	 * unspecified isEphemeral=. */
 	if (s1->isEphemeralAppSet != s2->isEphemeralAppSet)
 		return (s1->isEphemeralAppSet ? -1 : 1);
-
-	/* Give precedence to a specified isV2= over an
-	 * unspecified isV2=. */
-	if (s1->isV2AppSet != s2->isV2AppSet)
-		return (s1->isV2AppSet ? -1 : 1);
-
 
 	/* Give precedence to a specified isOwner= over an unspecified isOwner=. */
 	if (s1->isOwnerSet != s2->isOwnerSet)
@@ -421,7 +339,6 @@ static int seapp_context_cmp(const void *A, const void *B)
 		(s1->isPrivAppSet && s1->isPrivApp == s2->isPrivApp) &&
 		(s1->isOwnerSet && s1->isOwner == s2->isOwner) &&
 		(s1->isSystemServer && s1->isSystemServer == s2->isSystemServer) &&
-		(s1->isV2AppSet && s1->isV2App == s2->isV2App) &&
 		(s1->isEphemeralAppSet && s1->isEphemeralApp == s2->isEphemeralApp);
 
 	if (dup) {
@@ -590,16 +507,6 @@ int selinux_android_seapp_context_reload(void)
 						cur->isEphemeralApp = true;
 					else if (!strcasecmp(value, "false"))
 						cur->isEphemeralApp = false;
-					else {
-						free_seapp_context(cur);
-						goto err;
-					}
-				} else if (!strcasecmp(name, "isV2App")) {
-					cur->isV2AppSet = true;
-					if (!strcasecmp(value, "true"))
-						cur->isV2App = true;
-					else if (!strcasecmp(value, "false"))
-						cur->isV2App = false;
 					else {
 						free_seapp_context(cur);
 						goto err;
@@ -789,12 +696,11 @@ int selinux_android_seapp_context_reload(void)
 		int i;
 		for (i = 0; i < nspec; i++) {
 			cur = seapp_contexts[i];
-			selinux_log(SELINUX_INFO, "%s:  isSystemServer=%s  isEphemeralApp=%s isV2App=%s isOwner=%s user=%s seinfo=%s "
+			selinux_log(SELINUX_INFO, "%s:  isSystemServer=%s  isEphemeralApp=%s isOwner=%s user=%s seinfo=%s "
 					"name=%s path=%s isPrivApp=%s minTargetSdkVersion=%d fromRunAs=%s -> domain=%s type=%s level=%s levelFrom=%s",
 				__FUNCTION__,
 				cur->isSystemServer ? "true" : "false",
 				cur->isEphemeralAppSet ? (cur->isEphemeralApp ? "true" : "false") : "null",
-				cur->isV2AppSet ? (cur->isV2App ? "true" : "false") : "null",
 				cur->isOwnerSet ? (cur->isOwner ? "true" : "false") : "null",
 				cur->user.str,
 				cur->seinfo, cur->name.str, cur->path.str,
@@ -855,7 +761,6 @@ enum seapp_kind {
 
 #define PRIVILEGED_APP_STR ":privapp"
 #define EPHEMERAL_APP_STR ":ephemeralapp"
-#define V2_APP_STR ":v2"
 #define TARGETSDKVERSION_STR ":targetSdkVersion="
 #define FROM_RUNAS_STR ":fromRunAs"
 static int32_t get_app_targetSdkVersion(const char *seinfo)
@@ -915,7 +820,6 @@ static int seapp_context_lookup(enum seapp_kind kind,
 	bool isPrivApp = false;
 	bool isEphemeralApp = false;
 	int32_t targetSdkVersion = 0;
-	bool isV2App = false;
 	bool fromRunAs = false;
 	char parsedseinfo[BUFSIZ];
 
@@ -926,7 +830,6 @@ static int seapp_context_lookup(enum seapp_kind kind,
 			goto err;
 		isPrivApp = strstr(seinfo, PRIVILEGED_APP_STR) ? true : false;
 		isEphemeralApp = strstr(seinfo, EPHEMERAL_APP_STR) ? true : false;
-		isV2App = strstr(seinfo, V2_APP_STR) ? true : false;
 		fromRunAs = strstr(seinfo, FROM_RUNAS_STR) ? true : false;
 		targetSdkVersion = get_app_targetSdkVersion(seinfo);
 		if (targetSdkVersion < 0) {
@@ -973,9 +876,6 @@ static int seapp_context_lookup(enum seapp_kind kind,
 			continue;
 
 		if (cur->isEphemeralAppSet && cur->isEphemeralApp != isEphemeralApp)
-			continue;
-
-		if (cur->isV2AppSet && cur->isV2App != isV2App)
 			continue;
 
 		if (cur->isOwnerSet && cur->isOwner != isOwner)
@@ -1324,6 +1224,7 @@ struct pkg_info *package_info_lookup(const char *name)
  * to delay restorecon of those until vold explicitly requests it. */
 // NOTE: these paths need to be kept in sync with vold
 #define DATA_SYSTEM_CE_PREFIX "/data/system_ce/"
+#define DATA_VENDOR_CE_PREFIX "/data/vendor_ce/"
 #define DATA_MISC_CE_PREFIX "/data/misc_ce/"
 
 /* The path prefixes of package data directories. */
@@ -1713,7 +1614,8 @@ static int selinux_android_restorecon_common(const char* pathname_orig,
 
             if (skipce &&
                 (!strncmp(ftsent->fts_path, DATA_SYSTEM_CE_PREFIX, sizeof(DATA_SYSTEM_CE_PREFIX)-1) ||
-                 !strncmp(ftsent->fts_path, DATA_MISC_CE_PREFIX, sizeof(DATA_MISC_CE_PREFIX)-1))) {
+                 !strncmp(ftsent->fts_path, DATA_MISC_CE_PREFIX, sizeof(DATA_MISC_CE_PREFIX)-1) ||
+                 !strncmp(ftsent->fts_path, DATA_VENDOR_CE_PREFIX, sizeof(DATA_VENDOR_CE_PREFIX)-1))) {
                 // Don't label anything below this directory.
                 fts_set(fts, ftsent, FTS_SKIP);
                 // but fall through and make sure we label the directory itself
